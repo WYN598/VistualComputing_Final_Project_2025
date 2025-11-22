@@ -220,9 +220,9 @@ int main(int argc, char** argv) {
             BulletTextWrapped("Pan: Right Click + Drag");
             BulletTextWrapped("Zoom: Scroll Wheel");
             ImGui::Spacing();
-            ImGui::TextWrapped("Modes:");
-            BulletTextWrapped("Auto: Good for random photos. Uses fake depth scale.");
-            BulletTextWrapped("Manual: Good for datasets (Middlebury). Produces real metrics.");
+            ImGui::TextWrapped("Tips:");
+            BulletTextWrapped("Artroom: Use WLS, small block size (5-7), min disp 90.");
+            BulletTextWrapped("Skiboots: Min disp 57, block size 15+.");
             ImGui::PopStyleColor();
             ImGui::Separator();
         }
@@ -230,7 +230,6 @@ int main(int argc, char** argv) {
         // 1. Data Source
         ImGui::Spacing();
         ImGui::TextColored(ImVec4(0.4f, 0.6f, 1.0f, 1.0f), "1. DATA SOURCE"); ImGui::Separator(); ImGui::Spacing();
-        // Fixed ID conflict by using different labels
         if (ImGui::Button(state.pathL.empty() ? "Left Img" : "Left OK", ImVec2(120, 80))) {
             std::string p = OpenFileDialog(); if (!p.empty()) { state.pathL = p; g_Log.AddLog("Left: %s\n", p.c_str()); }
         }
@@ -239,12 +238,11 @@ int main(int argc, char** argv) {
             std::string p = OpenFileDialog(); if (!p.empty()) { state.pathR = p; g_Log.AddLog("Right: %s\n", p.c_str()); }
         }
 
-        // 2. Camera Calibration (Logic Fixed)
+        // 2. Camera Calibration
         ImGui::Spacing();
         ImGui::TextColored(ImVec4(1.0f, 0.6f, 0.0f, 1.0f), "2. CAMERA CALIBRATION"); ImGui::Separator();
-        // Bind directly to state.params.useCalibration
         ImGui::Checkbox("Use Manual Calibration", &state.params.useCalibration);
-        ImGui::SameLine(); HelpMarker("Check this if you have rectified images and known camera parameters (e.g., Middlebury).\nUncheck for random uncalibrated photos.");
+        ImGui::SameLine(); HelpMarker("Check this if you have rectified images and known camera parameters (e.g., Middlebury).");
 
         if (state.params.useCalibration) {
             ImGui::BeginDisabled(false);
@@ -264,27 +262,41 @@ int main(int argc, char** argv) {
         ImGui::Spacing();
         ImGui::TextColored(ImVec4(0.8f, 0.4f, 0.8f, 1.0f), "3. ALGORITHM SETTINGS"); ImGui::Separator();
 
-        ImGui::Text("Processing Scale"); ImGui::SameLine();
-        HelpMarker("Fast (50%): 4x faster.\nHigh (100%): Best detail.");
+        // [New] WLS Filter Toggle
+        ImGui::Checkbox("Use WLS Filter (Pro)", &state.params.useWLS);
+        ImGui::SameLine(); HelpMarker("Weighted Least Squares Filter.\nFill holes and smooth surfaces based on color edges.");
+
+        if (state.params.useWLS) {
+            ImGui::Indent();
+            int lambda = (int)state.params.wlsLambda;
+            if (ImGui::SliderInt("WLS Lambda", &lambda, 500, 12000)) state.params.wlsLambda = (double)lambda;
+
+            float sigma = (float)state.params.wlsSigma;
+            if (ImGui::SliderFloat("WLS Sigma", &sigma, 0.5f, 3.0f)) state.params.wlsSigma = (double)sigma;
+            ImGui::Unindent();
+        }
+
+        ImGui::Text("Processing Scale");
         if (ImGui::RadioButton("Fast (50%)", state.params.processScale == 0.5f)) state.params.processScale = 0.5f; ImGui::SameLine();
         if (ImGui::RadioButton("High (100%)", state.params.processScale == 1.0f)) state.params.processScale = 1.0f;
 
-        ImGui::Text("Disparities"); ImGui::SameLine(); HelpMarker("Max search range for matching points.");
-        ImGui::SliderInt("##num", &state.params.numDisparities, 16, 256); state.params.numDisparities = (state.params.numDisparities / 16) * 16;
+        ImGui::Text("Disparities"); ImGui::SameLine(); HelpMarker("Max search range (must be > max_disp in calib.txt).");
+        ImGui::SliderInt("##num", &state.params.numDisparities, 16, 400); state.params.numDisparities = (state.params.numDisparities / 16) * 16;
 
-        ImGui::Text("Block Size"); ImGui::SameLine(); HelpMarker("Window size. Small=Detail, Large=Smooth.");
+        ImGui::Text("Block Size"); ImGui::SameLine(); HelpMarker("Window size. Small=Detail(Artroom), Large=Smooth(Skiboots).");
         ImGui::SliderInt("##blk", &state.params.blockSize, 5, 31); if (state.params.blockSize % 2 == 0) state.params.blockSize++;
 
-        ImGui::Text("Min Disp"); ImGui::SameLine(); HelpMarker("Depth offset.");
-        ImGui::SliderInt("##min", &state.params.minDisparity, -20, 200);
+        ImGui::Text("Min Disp"); ImGui::SameLine(); HelpMarker("Minimum disparity (vmin in calib.txt).");
+        // [FIX] Increased range from -20~20 to 0~300 to accommodate real datasets
+        ImGui::SliderInt("##min", &state.params.minDisparity, 0, 300);
 
-        ImGui::Text("Noise Filter"); ImGui::SameLine(); HelpMarker("Uniqueness ratio (Strictness).");
+        ImGui::Text("Noise Filter"); ImGui::SameLine(); HelpMarker("Uniqueness Ratio. Lower = More points (noisier). Higher = Cleaner (less points).");
         ImGui::SliderInt("##uniq", &state.params.uniquenessRatio, 0, 20);
 
         // 4. Visualization
         ImGui::Spacing();
         ImGui::TextColored(ImVec4(0.4f, 0.8f, 0.4f, 1.0f), "4. VISUALIZATION"); ImGui::Separator();
-        ImGui::Text("Point Size"); ImGui::SameLine(); HelpMarker("Size of rendered points.");
+        ImGui::Text("Point Size");
         ImGui::SliderFloat("##pt", &renderer.pointSize, 1.0f, 10.0f);
 
         ImGui::Spacing(); ImGui::Separator(); ImGui::Spacing();
@@ -295,7 +307,6 @@ int main(int argc, char** argv) {
             else {
                 state.isProcessing = true;
                 g_Log.AddLog("Starting reconstruction job...\n");
-                // Capture params by value for thread safety
                 futureResult = std::async(std::launch::async,
                     [&processor, pathL = state.pathL, pathR = state.pathR, params = state.params]() {
                     return processor.process(pathL, pathR, params);
@@ -345,7 +356,6 @@ int main(int argc, char** argv) {
         ImGui::SetNextWindowSize(ImVec2(200, 0));
         ImGui::Begin("ViewMode", NULL, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoBackground);
 
-        // View Mode Logic (Stack Balanced)
         bool is3D = (state.viewMode == 0);
         if (is3D) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.2f, 0.6f, 0.2f, 1));
         if (ImGui::Button("3D View", ImVec2(90, 30))) state.viewMode = 0;
@@ -367,7 +377,7 @@ int main(int argc, char** argv) {
         glClearColor(0.11f, 0.12f, 0.15f, 1.0f); // Dark Background
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-        // Layer 1: Disparity (Background) - Z-Order Fix
+        // Layer 1: Disparity (Background)
         if (state.viewMode == 1 && renderer.disparityTexture != 0) {
             float viewX = state.sidebarWidth;
             float viewW = (float)dispW - state.sidebarWidth;
