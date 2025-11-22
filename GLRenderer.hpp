@@ -7,7 +7,7 @@
 #include <opencv2/opencv.hpp>
 #include "StereoProcessor.hpp"
 
-// === Shaders ===
+// Shaders
 const char* vShaderSrc = R"(
     #version 330 core
     layout (location = 0) in vec3 aPos;
@@ -22,66 +22,36 @@ const char* fShaderSrc = R"(
     void main() { FragColor = vec4(vColor, 1.0); }
 )";
 
-// === 专业轨道相机类 (Orbit Camera) ===
 class Camera {
 public:
-    glm::vec3 Target = glm::vec3(0.0f); // 观察目标点
-    float Distance = 1000.0f;           // 距离
+    glm::vec3 Target = glm::vec3(0.0f);
+    float Distance = 1000.0f;
     float Yaw = 0.0f;
     float Pitch = -30.0f;
 
-    // 获取观察矩阵
     glm::mat4 getViewMatrix() {
         float radYaw = glm::radians(Yaw);
         float radPitch = glm::radians(Pitch);
-
-        // 球坐标转笛卡尔坐标
         float camX = Target.x + Distance * sin(radYaw) * cos(radPitch);
         float camY = Target.y + Distance * sin(radPitch);
         float camZ = Target.z + Distance * cos(radYaw) * cos(radPitch);
-
         glm::vec3 pos(camX, camY, camZ);
         glm::vec3 up(0.0f, 1.0f, 0.0f);
         return glm::lookAt(pos, Target, up);
     }
-
-    // [旋转] 左键拖动
     void processRotate(float dx, float dy) {
-        Yaw += dx * 0.3f;
-        Pitch -= dy * 0.3f;
-        if (Pitch > 89.0f) Pitch = 89.0f;
-        if (Pitch < -89.0f) Pitch = -89.0f;
+        Yaw += dx * 0.3f; Pitch -= dy * 0.3f;
+        if (Pitch > 89.0f) Pitch = 89.0f; if (Pitch < -89.0f) Pitch = -89.0f;
     }
-
-    // [缩放] 滚轮
-    void processZoom(float dy) {
-        Distance -= dy * 100.0f;
-        if (Distance < 10.0f) Distance = 10.0f;
-    }
-
-    // [平移] 右键拖动 (新增)
-    // 根据摄像机当前的朝向，计算出“屏幕平面”的右向量和上向量，实现抓手平移效果
+    void processZoom(float dy) { Distance -= dy * 100.0f; if (Distance < 10.0f) Distance = 10.0f; }
     void processPan(float dx, float dy) {
-        float speed = Distance * 0.001f; // 距离越远，移动越快，保持手感一致
-
-        float radYaw = glm::radians(Yaw);
-        float radPitch = glm::radians(Pitch);
-
-        // 计算相机的前方向量 (Front)
-        glm::vec3 front;
-        front.x = sin(radYaw) * cos(radPitch);
-        front.y = sin(radPitch);
-        front.z = cos(radYaw) * cos(radPitch);
+        float speed = Distance * 0.001f;
+        float radYaw = glm::radians(Yaw); float radPitch = glm::radians(Pitch);
+        glm::vec3 front(sin(radYaw) * cos(radPitch), sin(radPitch), cos(radYaw) * cos(radPitch));
         front = glm::normalize(front);
-
-        // 计算右向量 (Right) 和 上向量 (Real Up)
-        glm::vec3 worldUp(0.0f, 1.0f, 0.0f);
-        glm::vec3 right = glm::normalize(glm::cross(front, worldUp));
+        glm::vec3 right = glm::normalize(glm::cross(front, glm::vec3(0, 1, 0)));
         glm::vec3 up = glm::normalize(glm::cross(right, front));
-
-        // 移动目标点 (反向移动实现“抓手”效果：鼠标往左，物体往左=相机往右)
-        Target -= right * dx * speed;
-        Target += up * dy * speed;
+        Target -= right * dx * speed; Target += up * dy * speed;
     }
 };
 
@@ -89,19 +59,17 @@ class GLRenderer {
 public:
     GLFWwindow* window;
     GLuint prog;
-    GLuint VAO_P, VBO_P; // Point Cloud
-    GLuint VAO_G, VBO_G; // Grid
+    GLuint VAO_P, VBO_P, VAO_G, VBO_G;
     GLuint disparityTexture = 0;
     int width = 1600, height = 900;
-
     Camera camera;
-
-    // 交互状态管理
     bool isRotateDragging = false;
     bool isPanDragging = false;
     double lastX = 0, lastY = 0;
-
     int gridVertexCount = 0;
+
+    // 渲染设置 (移除了 bgColor)
+    float pointSize = 2.0f;
 
     bool init() {
         if (!glfwInit()) return false;
@@ -119,14 +87,11 @@ public:
         glEnable(GL_PROGRAM_POINT_SIZE);
         glEnable(GL_MULTISAMPLE);
 
-        // Shader
         GLuint vs = glCreateShader(GL_VERTEX_SHADER); glShaderSource(vs, 1, &vShaderSrc, 0); glCompileShader(vs);
         GLuint fs = glCreateShader(GL_FRAGMENT_SHADER); glShaderSource(fs, 1, &fShaderSrc, 0); glCompileShader(fs);
         prog = glCreateProgram(); glAttachShader(prog, vs); glAttachShader(prog, fs); glLinkProgram(prog);
 
-        // Buffer
         glGenVertexArrays(1, &VAO_P); glGenBuffers(1, &VBO_P);
-
         initGridAxes();
         return true;
     }
@@ -135,18 +100,15 @@ public:
         std::vector<Vertex> lines;
         float size = 2000.0f; float step = 200.0f;
         glm::vec3 gray(0.25f); glm::vec3 dark(0.15f);
-
         for (float i = -size; i <= size; i += step) {
             glm::vec3 c = (abs(i) < 0.1f) ? glm::vec3(0) : ((int)i % (int)(step * 5) == 0 ? gray : dark);
             if (abs(i) < 0.1f) continue;
             lines.push_back({ glm::vec3(i, 0, -size), c }); lines.push_back({ glm::vec3(i, 0, size), c });
             lines.push_back({ glm::vec3(-size, 0, i), c }); lines.push_back({ glm::vec3(size, 0, i), c });
         }
-        // Axes
         lines.push_back({ glm::vec3(-size, 0, 0), glm::vec3(0.8f, 0.2f, 0.2f) }); lines.push_back({ glm::vec3(size, 0, 0), glm::vec3(0.8f, 0.2f, 0.2f) });
         lines.push_back({ glm::vec3(0, 0, -size), glm::vec3(0.2f, 0.2f, 0.8f) }); lines.push_back({ glm::vec3(0, 0, size), glm::vec3(0.2f, 0.2f, 0.8f) });
         lines.push_back({ glm::vec3(0, -size, 0), glm::vec3(0.2f, 0.8f, 0.2f) }); lines.push_back({ glm::vec3(0, size, 0), glm::vec3(0.2f, 0.8f, 0.2f) });
-
         gridVertexCount = (int)lines.size();
         glGenVertexArrays(1, &VAO_G); glGenBuffers(1, &VBO_G);
         glBindVertexArray(VAO_G); glBindBuffer(GL_ARRAY_BUFFER, VBO_G);
@@ -178,11 +140,13 @@ public:
         glm::mat4 proj = glm::perspective(glm::radians(45.0f), (float)dw / dh, 1.0f, 10000.0f);
         glm::mat4 view = camera.getViewMatrix();
         glm::mat4 MVP = proj * view;
-
         glUseProgram(prog);
         glUniformMatrix4fv(glGetUniformLocation(prog, "MVP"), 1, GL_FALSE, &MVP[0][0]);
-
-        glBindVertexArray(VAO_G); glLineWidth(1.0f); glDrawArrays(GL_LINES, 0, gridVertexCount); // Grid
-        if (pointCount > 0) { glBindVertexArray(VAO_P); glPointSize(2.0f); glDrawArrays(GL_POINTS, 0, (GLsizei)pointCount); } // Points
+        glBindVertexArray(VAO_G); glLineWidth(1.0f); glDrawArrays(GL_LINES, 0, gridVertexCount);
+        if (pointCount > 0) {
+            glBindVertexArray(VAO_P);
+            glPointSize(pointSize);
+            glDrawArrays(GL_POINTS, 0, (GLsizei)pointCount);
+        }
     }
 };
