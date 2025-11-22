@@ -9,13 +9,13 @@
 #include <string>
 #include <sstream>
 
-// 3D 顶点
+// 3D Vertex Structure
 struct Vertex {
     glm::vec3 position;
     glm::vec3 color;
 };
 
-// 算法参数
+// Algorithm Parameters
 struct StereoParams {
     int numDisparities = 64;
     int blockSize = 9;
@@ -26,7 +26,7 @@ struct StereoParams {
     float processScale = 0.5f; // 0.5=Fast, 1.0=High Quality
 };
 
-// 简单的日志回调接口
+// Simple Logger Callback
 typedef void (*LogCallback)(const char* fmt, ...);
 
 class StereoProcessor {
@@ -35,7 +35,7 @@ public:
     cv::Mat disparityVis;
     cv::Mat rectLeft, rectRight;
 
-    // 外部注入日志函数
+    // External Logger Injection
     LogCallback logger = nullptr;
 
     void setLogger(LogCallback cb) { logger = cb; }
@@ -45,8 +45,8 @@ public:
             char buf[1024];
             va_list args;
             va_start(args, fmt);
-            vsnprintf(buf, IM_ARRAYSIZE(buf), fmt, args);
-            buf[IM_ARRAYSIZE(buf) - 1] = 0;
+            vsnprintf(buf, 1024, fmt, args);
+            buf[1023] = 0;
             va_end(args);
             logger("%s", buf);
         }
@@ -63,24 +63,24 @@ public:
                 return false;
             }
 
-            // 根据用户设定的 Scale 进行缩放
+            // Resize images based on user setting
             if (params.processScale < 0.99f) {
                 cv::resize(imgL, imgL, cv::Size(), params.processScale, params.processScale);
                 cv::resize(imgR, imgR, cv::Size(), params.processScale, params.processScale);
                 log("[Vision] Resized input to %.0f%% for performance.", params.processScale * 100.0f);
             }
 
-            // 自动校正
+            // Auto Rectification
             log("[Vision] Computing Rectification (SIFT + RANSAC)...");
             if (!computeRectification(imgL, imgR)) {
                 log("[Error] Rectification failed. Features not found.");
                 return false;
             }
 
-            // SGBM 参数规整
+            // Align SGBM parameters
             int realNumDisp = (params.numDisparities / 16) * 16;
             if (realNumDisp < 16) realNumDisp = 16;
-            int realBlockSize = params.blockSize | 1;
+            int realBlockSize = params.blockSize | 1; // Ensure odd number
 
             log("[Vision] Running SGBM (Disp: %d, Block: %d)...", realNumDisp, realBlockSize);
 
@@ -98,12 +98,12 @@ public:
             cv::Mat disp16;
             sgbm->compute(rectLeft, rectRight, disp16);
 
-            // 可视化
+            // Visualization
             cv::Mat disp8;
             disp16.convertTo(disp8, CV_8U, 255.0 / (realNumDisp * 16.0));
             cv::applyColorMap(disp8, disparityVis, cv::COLORMAP_INFERNO);
 
-            // 重投影
+            // Reprojection
             log("[Vision] Reprojecting to 3D...");
             double W = rectLeft.cols;
             double H = rectLeft.rows;
@@ -116,7 +116,7 @@ public:
             cv::Mat points3D;
             cv::reprojectImageTo3D(disp16, points3D, Q, true);
 
-            // 生成点云
+            // Generate Point Cloud
             pointCloud.clear();
             pointCloud.reserve(W * H);
 
@@ -126,7 +126,7 @@ public:
                     cv::Vec3f p = points3D.at<cv::Vec3f>(y, x);
                     cv::Vec3b c = rectLeft.at<cv::Vec3b>(y, x);
 
-                    // 深度过滤
+                    // Depth and Black border filtering
                     if (std::isfinite(p[2]) && p[2] > 0 && p[2] < 8000 && (c[0] + c[1] + c[2] > 20)) {
                         Vertex v;
                         v.position = glm::vec3(p[0], -p[1], -p[2]);
@@ -148,9 +148,13 @@ public:
         if (pointCloud.empty()) return false;
         std::ofstream out(filename);
         if (!out.is_open()) return false;
+
+        // PLY Header
         out << "ply\nformat ascii 1.0\nelement vertex " << pointCloud.size() << "\n";
         out << "property float x\nproperty float y\nproperty float z\n";
         out << "property uchar red\nproperty uchar green\nproperty uchar blue\nend_header\n";
+
+        // Data
         for (const auto& v : pointCloud) {
             out << v.position.x << " " << v.position.y << " " << v.position.z << " "
                 << (int)(v.color.r * 255) << " " << (int)(v.color.g * 255) << " " << (int)(v.color.b * 255) << "\n";
@@ -162,16 +166,20 @@ private:
     bool computeRectification(const cv::Mat& imgL, const cv::Mat& imgR) {
         std::vector<cv::KeyPoint> kp1, kp2;
         cv::Mat desc1, desc2;
+
+        // SIFT Detection
         cv::Ptr<cv::SIFT> sift = cv::SIFT::create();
         sift->detectAndCompute(imgL, cv::noArray(), kp1, desc1);
         sift->detectAndCompute(imgR, cv::noArray(), kp2, desc2);
 
         if (desc1.empty() || desc2.empty()) return false;
 
+        // KNN Matching
         cv::FlannBasedMatcher matcher;
         std::vector<std::vector<cv::DMatch>> knn_matches;
         matcher.knnMatch(desc1, desc2, knn_matches, 2);
 
+        // Ratio Test Filter
         std::vector<cv::Point2f> pts1, pts2;
         const float ratio_thresh = 0.75f;
         for (size_t i = 0; i < knn_matches.size(); i++) {
@@ -183,6 +191,7 @@ private:
         log("[Vision] Features matched: %d", (int)pts1.size());
         if (pts1.size() < 15) return false;
 
+        // RANSAC for Fundamental Matrix
         cv::Mat mask;
         cv::Mat F = cv::findFundamentalMat(pts1, pts2, cv::FM_RANSAC, 3.0, 0.99, mask);
         if (F.empty()) return false;
@@ -197,6 +206,7 @@ private:
         log("[Vision] RANSAC Inliers: %d", (int)good1.size());
         if (good1.size() < 10) return false;
 
+        // Stereo Rectification
         cv::Mat H1, H2;
         cv::stereoRectifyUncalibrated(good1, good2, F, imgL.size(), H1, H2, 5.0);
         cv::warpPerspective(imgL, rectLeft, H1, imgL.size());

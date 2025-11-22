@@ -13,7 +13,7 @@
 #include "StereoProcessor.hpp"
 #include "GLRenderer.hpp"
 
-// --- 日志系统 ---
+// --- Log System ---
 struct AppLog {
     ImGuiTextBuffer Buf;
     ImVector<int> LineOffsets;
@@ -50,7 +50,7 @@ struct AppState {
     bool isProcessing = false;
     bool processSuccess = false;
     int viewMode = 0;
-    float sidebarWidth = 380.0f; // 动态记录侧边栏宽度
+    float sidebarWidth = 380.0f; // Dynamic sidebar width
 };
 
 std::string OpenFileDialog(bool save = false) {
@@ -74,8 +74,7 @@ void SetupProfessionalStyle() {
     colors[ImGuiCol_TitleBgActive] = ImVec4(0.20f, 0.22f, 0.27f, 1.00f);
 }
 
-// --- 辅助组件：帮助提示标记 ---
-// 在文本旁边显示一个 (?)，鼠标悬停时弹出解释
+// --- Helper: Help Tooltip ---
 void HelpMarker(const char* desc) {
     ImGui::TextDisabled("(?)");
     if (ImGui::IsItemHovered()) {
@@ -87,7 +86,7 @@ void HelpMarker(const char* desc) {
     }
 }
 
-// 辅助函数：带自动换行的 Bullet Text
+// Helper: Wrapped Bullet Text
 void BulletTextWrapped(const char* text) {
     ImGui::Bullet();
     ImGui::PushTextWrapPos(ImGui::GetCursorPos().x + ImGui::GetContentRegionAvail().x);
@@ -102,6 +101,7 @@ int main(int argc, char** argv) {
     IMGUI_CHECKVERSION(); ImGui::CreateContext(); ImGuiIO& io = ImGui::GetIO(); (void)io;
     SetupProfessionalStyle();
 
+    // Load system font (Segoe UI)
     ImFont* font = io.Fonts->AddFontFromFileTTF("c:\\Windows\\Fonts\\segoeui.ttf", 18.0f);
     if (!font) io.Fonts->AddFontDefault();
 
@@ -121,16 +121,21 @@ int main(int argc, char** argv) {
         glfwPollEvents();
         ImGui_ImplOpenGL3_NewFrame(); ImGui_ImplGlfw_NewFrame(); ImGui::NewFrame();
 
-        // 交互处理
+        // --- 3D Interaction Logic ---
         if (!io.WantCaptureMouse) {
             double x, y; glfwGetCursorPos(renderer.window, &x, &y);
+
+            // Zoom
             if (io.MouseWheel != 0.0f) renderer.camera.processZoom((float)io.MouseWheel);
+
+            // Rotate (Left Mouse)
             if (glfwGetMouseButton(renderer.window, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS) {
                 if (!renderer.isRotateDragging) { renderer.isRotateDragging = true; renderer.lastX = x; renderer.lastY = y; }
                 else { renderer.camera.processRotate((float)(x - renderer.lastX), (float)(y - renderer.lastY)); renderer.lastX = x; renderer.lastY = y; }
             }
             else renderer.isRotateDragging = false;
 
+            // Pan (Right Mouse)
             if (glfwGetMouseButton(renderer.window, GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS) {
                 if (!renderer.isPanDragging) { renderer.isPanDragging = true; renderer.lastX = x; renderer.lastY = y; }
                 else { renderer.camera.processPan((float)(x - renderer.lastX), (float)(y - renderer.lastY)); renderer.lastX = x; renderer.lastY = y; }
@@ -140,7 +145,7 @@ int main(int argc, char** argv) {
 
         int dispW, dispH; glfwGetFramebufferSize(renderer.window, &dispW, &dispH);
 
-        // 异步结果
+        // --- Check Async Task ---
         if (state.isProcessing && futureResult.valid()) {
             if (futureResult.wait_for(std::chrono::milliseconds(0)) == std::future_status::ready) {
                 state.processSuccess = futureResult.get(); state.isProcessing = false;
@@ -151,7 +156,7 @@ int main(int argc, char** argv) {
             }
         }
 
-        // 模态窗口
+        // --- Modal Loading Window ---
         if (state.isProcessing) ImGui::OpenPopup("Processing");
         if (ImGui::BeginPopupModal("Processing", NULL, ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoMove)) {
             ImGui::Text("Processing Pipeline Running..."); ImGui::Separator();
@@ -160,16 +165,20 @@ int main(int argc, char** argv) {
             ImGui::EndPopup();
         }
 
+        // ==================================================================================
+        // UI Layout Definition
+        // ==================================================================================
+
         // ----------------------------------------------------------
-        // 1. 左侧控制面板 (Sidebar)
+        // 1. Sidebar (Left Control Panel)
         // ----------------------------------------------------------
         ImGui::SetNextWindowPos(ImVec2(0, 0));
         ImGui::SetNextWindowSize(ImVec2(state.sidebarWidth, (float)dispH), ImGuiCond_FirstUseEver);
         ImGui::Begin("Controls", NULL, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoCollapse);
 
-        state.sidebarWidth = ImGui::GetWindowWidth(); // 记录实时宽度
+        state.sidebarWidth = ImGui::GetWindowWidth(); // Track width for layout
 
-        // === 用户指南 ===
+        // === User Guide ===
         if (ImGui::CollapsingHeader("USER GUIDE & HELP", ImGuiTreeNodeFlags_DefaultOpen)) {
             ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.8f, 0.8f, 0.8f, 1.0f));
             ImGui::TextWrapped("How to Navigate:");
@@ -193,7 +202,7 @@ int main(int argc, char** argv) {
         ImGui::Spacing();
         ImGui::TextColored(ImVec4(0.8f, 0.4f, 0.8f, 1.0f), "2. ALGORITHM SETTINGS"); ImGui::Separator();
 
-        // === 参数区域：添加 HelpMarker ===
+        // === Parameters with Help Markers ===
 
         ImGui::Text("Processing Scale"); ImGui::SameLine();
         HelpMarker("Downscale images before processing to speed up computation.\n\nFast (50%): 4x faster, good for tuning.\nHigh (100%): Best detail, slower.");
@@ -226,7 +235,16 @@ int main(int argc, char** argv) {
         ImGui::Spacing(); ImGui::Separator(); ImGui::Spacing();
         if (ImGui::Button("RUN RECONSTRUCTION", ImVec2(-1, 50)) && !state.isProcessing) {
             if (state.pathL.empty() || state.pathR.empty()) g_Log.AddLog("[Error] Missing images!\n");
-            else { state.isProcessing = true; g_Log.AddLog("Starting reconstruction job...\n"); futureResult = std::async(std::launch::async, [&]() {return processor.process(state.pathL, state.pathR, state.params);}); }
+            else {
+                state.isProcessing = true;
+                g_Log.AddLog("Starting reconstruction job...\n");
+                // Create explicit copies of string data to ensure thread safety
+                futureResult = std::async(std::launch::async,
+                    [&processor, pathL = state.pathL, pathR = state.pathR, params = state.params]() {
+                    return processor.process(pathL, pathR, params);
+                }
+                );
+            }
         }
         if (ImGui::Button("EXPORT RESULT (.PLY)", ImVec2(-1, 30))) {
             if (processor.pointCloud.empty()) g_Log.AddLog("[Error] Nothing to export.\n");
@@ -235,7 +253,7 @@ int main(int argc, char** argv) {
         ImGui::End();
 
         // ----------------------------------------------------------
-        // 2. 底部控制台 (Bottom Console) - 可拉伸
+        // 2. Bottom Console (Resizable)
         // ----------------------------------------------------------
         if (logHeight < 50.0f) logHeight = 50.0f;
         if (logHeight > dispH * 0.6f) logHeight = dispH * 0.6f;
@@ -243,7 +261,7 @@ int main(int argc, char** argv) {
         float consoleY = (float)dispH - logHeight;
         float consoleW = (float)dispW - state.sidebarWidth;
 
-        // Splitter
+        // Splitter (Invisible resize handle)
         ImGui::SetNextWindowPos(ImVec2(state.sidebarWidth, consoleY - 4.0f));
         ImGui::SetNextWindowSize(ImVec2(consoleW, 4.0f));
         ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0, 0, 0, 0));
@@ -254,7 +272,7 @@ int main(int argc, char** argv) {
         if (ImGui::IsItemActive()) logHeight -= ImGui::GetIO().MouseDelta.y;
         ImGui::End();
 
-        // Console
+        // Console Content
         ImGui::SetNextWindowPos(ImVec2(state.sidebarWidth, consoleY));
         ImGui::SetNextWindowSize(ImVec2(consoleW, logHeight));
         ImGui::Begin("Console Output", NULL, ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoCollapse);
@@ -262,7 +280,7 @@ int main(int argc, char** argv) {
         ImGui::End();
 
         // ----------------------------------------------------------
-        // 3. 悬浮组件: 视图切换
+        // 3. View Switcher (Floating Top-Right)
         // ----------------------------------------------------------
         ImGui::SetNextWindowPos(ImVec2((float)dispW - 220, 20));
         ImGui::SetNextWindowSize(ImVec2(200, 0));
@@ -274,13 +292,13 @@ int main(int argc, char** argv) {
         ImGui::End();
 
         // ----------------------------------------------------------
-        // 4. 渲染层
+        // 4. Rendering Layer
         // ----------------------------------------------------------
         glViewport(0, 0, dispW, dispH);
         glClearColor(0.11f, 0.12f, 0.15f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-        // 视差图背景 (随 Sidebar 宽度变化)
+        // Render Disparity Background (if active)
         if (state.viewMode == 1 && renderer.disparityTexture != 0) {
             float viewX = state.sidebarWidth;
             float viewW = (float)dispW - state.sidebarWidth;
@@ -293,6 +311,7 @@ int main(int argc, char** argv) {
             ImGui::End();
         }
 
+        // Render 3D Scene (if active)
         if (state.viewMode == 0) renderer.render3D(processor.pointCloud.size());
 
         ImGui::Render(); ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());

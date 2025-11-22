@@ -7,7 +7,7 @@
 #include <opencv2/opencv.hpp>
 #include "StereoProcessor.hpp"
 
-// Shaders
+// --- Shaders ---
 const char* vShaderSrc = R"(
     #version 330 core
     layout (location = 0) in vec3 aPos;
@@ -22,6 +22,7 @@ const char* fShaderSrc = R"(
     void main() { FragColor = vec4(vColor, 1.0); }
 )";
 
+// --- Professional Orbit Camera Class ---
 class Camera {
 public:
     glm::vec3 Target = glm::vec3(0.0f);
@@ -29,29 +30,51 @@ public:
     float Yaw = 0.0f;
     float Pitch = -30.0f;
 
+    // Calculate View Matrix
     glm::mat4 getViewMatrix() {
         float radYaw = glm::radians(Yaw);
         float radPitch = glm::radians(Pitch);
+
+        // Spherical to Cartesian conversion
         float camX = Target.x + Distance * sin(radYaw) * cos(radPitch);
         float camY = Target.y + Distance * sin(radPitch);
         float camZ = Target.z + Distance * cos(radYaw) * cos(radPitch);
+
         glm::vec3 pos(camX, camY, camZ);
         glm::vec3 up(0.0f, 1.0f, 0.0f);
         return glm::lookAt(pos, Target, up);
     }
+
+    // Handle Rotation (Left Mouse Drag)
     void processRotate(float dx, float dy) {
-        Yaw += dx * 0.3f; Pitch -= dy * 0.3f;
-        if (Pitch > 89.0f) Pitch = 89.0f; if (Pitch < -89.0f) Pitch = -89.0f;
+        Yaw += dx * 0.3f;
+        Pitch -= dy * 0.3f;
+        // Clamp pitch to avoid gimbal lock
+        if (Pitch > 89.0f) Pitch = 89.0f;
+        if (Pitch < -89.0f) Pitch = -89.0f;
     }
-    void processZoom(float dy) { Distance -= dy * 100.0f; if (Distance < 10.0f) Distance = 10.0f; }
+
+    // Handle Zoom (Scroll Wheel)
+    void processZoom(float dy) {
+        Distance -= dy * 100.0f;
+        if (Distance < 10.0f) Distance = 10.0f;
+    }
+
+    // Handle Panning (Right Mouse Drag)
     void processPan(float dx, float dy) {
-        float speed = Distance * 0.001f;
-        float radYaw = glm::radians(Yaw); float radPitch = glm::radians(Pitch);
+        float speed = Distance * 0.001f; // Speed scales with distance
+        float radYaw = glm::radians(Yaw);
+        float radPitch = glm::radians(Pitch);
+
+        // Calculate Forward, Right, and Up vectors relative to camera view
         glm::vec3 front(sin(radYaw) * cos(radPitch), sin(radPitch), cos(radYaw) * cos(radPitch));
         front = glm::normalize(front);
         glm::vec3 right = glm::normalize(glm::cross(front, glm::vec3(0, 1, 0)));
         glm::vec3 up = glm::normalize(glm::cross(right, front));
-        Target -= right * dx * speed; Target += up * dy * speed;
+
+        // Move target inversely to mouse movement
+        Target -= right * dx * speed;
+        Target += up * dy * speed;
     }
 };
 
@@ -59,16 +82,18 @@ class GLRenderer {
 public:
     GLFWwindow* window;
     GLuint prog;
-    GLuint VAO_P, VBO_P, VAO_G, VBO_G;
+    GLuint VAO_P, VBO_P; // Point Cloud Buffers
+    GLuint VAO_G, VBO_G; // Grid/Axes Buffers
     GLuint disparityTexture = 0;
     int width = 1600, height = 900;
+
     Camera camera;
     bool isRotateDragging = false;
     bool isPanDragging = false;
     double lastX = 0, lastY = 0;
     int gridVertexCount = 0;
 
-    // äÖÈ¾ÉèÖÃ (ÒÆ³ýÁË bgColor)
+    // Visualization Settings
     float pointSize = 2.0f;
 
     bool init() {
@@ -76,7 +101,7 @@ public:
         glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
         glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
         glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
-        glfwWindowHint(GLFW_SAMPLES, 4);
+        glfwWindowHint(GLFW_SAMPLES, 4); // Enable MSAA
 
         window = glfwCreateWindow(width, height, "Pro Stereo Reconstruction", NULL, NULL);
         if (!window) return false;
@@ -87,28 +112,36 @@ public:
         glEnable(GL_PROGRAM_POINT_SIZE);
         glEnable(GL_MULTISAMPLE);
 
+        // Compile Shaders
         GLuint vs = glCreateShader(GL_VERTEX_SHADER); glShaderSource(vs, 1, &vShaderSrc, 0); glCompileShader(vs);
         GLuint fs = glCreateShader(GL_FRAGMENT_SHADER); glShaderSource(fs, 1, &fShaderSrc, 0); glCompileShader(fs);
         prog = glCreateProgram(); glAttachShader(prog, vs); glAttachShader(prog, fs); glLinkProgram(prog);
 
+        // Initialize Buffers
         glGenVertexArrays(1, &VAO_P); glGenBuffers(1, &VBO_P);
         initGridAxes();
         return true;
     }
 
+    // Initialize Infinite Grid and RGB Axes
     void initGridAxes() {
         std::vector<Vertex> lines;
         float size = 2000.0f; float step = 200.0f;
         glm::vec3 gray(0.25f); glm::vec3 dark(0.15f);
+
+        // Grid Lines
         for (float i = -size; i <= size; i += step) {
             glm::vec3 c = (abs(i) < 0.1f) ? glm::vec3(0) : ((int)i % (int)(step * 5) == 0 ? gray : dark);
-            if (abs(i) < 0.1f) continue;
+            if (abs(i) < 0.1f) continue; // Skip center lines (drawn as axes)
             lines.push_back({ glm::vec3(i, 0, -size), c }); lines.push_back({ glm::vec3(i, 0, size), c });
             lines.push_back({ glm::vec3(-size, 0, i), c }); lines.push_back({ glm::vec3(size, 0, i), c });
         }
+
+        // RGB Axes (Red=X, Green=Y, Blue=Z)
         lines.push_back({ glm::vec3(-size, 0, 0), glm::vec3(0.8f, 0.2f, 0.2f) }); lines.push_back({ glm::vec3(size, 0, 0), glm::vec3(0.8f, 0.2f, 0.2f) });
         lines.push_back({ glm::vec3(0, 0, -size), glm::vec3(0.2f, 0.2f, 0.8f) }); lines.push_back({ glm::vec3(0, 0, size), glm::vec3(0.2f, 0.2f, 0.8f) });
         lines.push_back({ glm::vec3(0, -size, 0), glm::vec3(0.2f, 0.8f, 0.2f) }); lines.push_back({ glm::vec3(0, size, 0), glm::vec3(0.2f, 0.8f, 0.2f) });
+
         gridVertexCount = (int)lines.size();
         glGenVertexArrays(1, &VAO_G); glGenBuffers(1, &VBO_G);
         glBindVertexArray(VAO_G); glBindBuffer(GL_ARRAY_BUFFER, VBO_G);
@@ -117,6 +150,7 @@ public:
         glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void*)offsetof(Vertex, color)); glEnableVertexAttribArray(1);
     }
 
+    // Upload Point Cloud Data to GPU
     void uploadGeometry(const std::vector<Vertex>& cloud) {
         if (cloud.empty()) return;
         glBindVertexArray(VAO_P); glBindBuffer(GL_ARRAY_BUFFER, VBO_P);
@@ -125,6 +159,7 @@ public:
         glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void*)offsetof(Vertex, color)); glEnableVertexAttribArray(1);
     }
 
+    // Upload Disparity Map as Texture
     void uploadTexture(const cv::Mat& img) {
         if (img.empty()) return;
         if (disparityTexture == 0) glGenTextures(1, &disparityTexture);
@@ -137,12 +172,20 @@ public:
 
     void render3D(size_t pointCount) {
         int dw, dh; glfwGetFramebufferSize(window, &dw, &dh); glViewport(0, 0, dw, dh);
+
         glm::mat4 proj = glm::perspective(glm::radians(45.0f), (float)dw / dh, 1.0f, 10000.0f);
         glm::mat4 view = camera.getViewMatrix();
         glm::mat4 MVP = proj * view;
+
         glUseProgram(prog);
         glUniformMatrix4fv(glGetUniformLocation(prog, "MVP"), 1, GL_FALSE, &MVP[0][0]);
-        glBindVertexArray(VAO_G); glLineWidth(1.0f); glDrawArrays(GL_LINES, 0, gridVertexCount);
+
+        // Draw Grid
+        glBindVertexArray(VAO_G);
+        glLineWidth(1.0f);
+        glDrawArrays(GL_LINES, 0, gridVertexCount);
+
+        // Draw Point Cloud
         if (pointCount > 0) {
             glBindVertexArray(VAO_P);
             glPointSize(pointSize);

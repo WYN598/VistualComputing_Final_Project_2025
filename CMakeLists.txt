@@ -9,7 +9,6 @@ project(StereoReconPro LANGUAGES C CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# 查找依赖 (vcpkg)
 find_package(OpenCV CONFIG REQUIRED)
 find_package(glfw3 CONFIG REQUIRED)
 find_package(glm CONFIG REQUIRED)
@@ -17,7 +16,6 @@ find_package(GLEW REQUIRED)
 find_package(OpenGL REQUIRED)
 find_package(imgui CONFIG REQUIRED)
 
-# 添加主程序
 add_executable(StereoReconPro
   main.cpp
   StereoProcessor.hpp
@@ -29,7 +27,6 @@ target_include_directories(StereoReconPro PRIVATE
   .
 )
 
-# OpenCV 链接修复逻辑
 set(_opencv_targets "")
 if (TARGET opencv_world)
   list(APPEND _opencv_targets opencv_world)
@@ -41,7 +38,6 @@ else()
   list(APPEND _opencv_targets ${OpenCV_LIBS})
 endif()
 
-# 链接所有库
 target_link_libraries(StereoReconPro PRIVATE
   ${_opencv_targets}
   glfw
@@ -51,6 +47,5 @@ target_link_libraries(StereoReconPro PRIVATE
   imgui::imgui
 )
 
-# 设置工作目录和 Unicode
 add_compile_definitions(UNICODE _UNICODE)
 set_property(TARGET StereoReconPro PROPERTY VS_DEBUGGER_WORKING_DIRECTORY $<TARGET_FILE_DIR:StereoReconPro>)
