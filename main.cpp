@@ -20,12 +20,14 @@ struct AppLog {
     bool AutoScroll = true;
 
     void Clear() { Buf.clear(); LineOffsets.clear(); LineOffsets.push_back(0); }
+
     void AddLog(const char* fmt, ...) IM_FMTARGS(2) {
         int old_size = Buf.size();
         va_list args; va_start(args, fmt); Buf.appendfv(fmt, args); va_end(args);
         for (int new_size = Buf.size(); old_size < new_size; old_size++)
             if (Buf[old_size] == '\n') LineOffsets.push_back(old_size + 1);
     }
+
     void DrawContent() {
         if (ImGui::Button("Clear")) Clear();
         ImGui::SameLine(); ImGui::Checkbox("Auto-scroll", &AutoScroll);
@@ -37,6 +39,7 @@ struct AppLog {
     }
 };
 
+// Global Log Instance
 AppLog g_Log;
 void LogCallbackFunc(const char* fmt, ...) {
     va_list args; va_start(args, fmt);
@@ -44,23 +47,28 @@ void LogCallbackFunc(const char* fmt, ...) {
     g_Log.AddLog("%s\n", buf);
 }
 
+// --- Global App State ---
 struct AppState {
     std::string pathL, pathR;
     StereoParams params;
     bool isProcessing = false;
     bool processSuccess = false;
-    int viewMode = 0;
-    float sidebarWidth = 380.0f; // Dynamic sidebar width
+    int viewMode = 0; // 0: 3D View, 1: Disparity View
+    float sidebarWidth = 380.0f;
 };
 
+// --- File Dialog Helper ---
 std::string OpenFileDialog(bool save = false) {
-    OPENFILENAMEA ofn; char szFile[260] = { 0 }; ZeroMemory(&ofn, sizeof(ofn)); ofn.lStructSize = sizeof(ofn); ofn.hwndOwner = NULL; ofn.lpstrFile = szFile; ofn.nMaxFile = sizeof(szFile);
+    OPENFILENAMEA ofn; char szFile[260] = { 0 }; ZeroMemory(&ofn, sizeof(ofn));
+    ofn.lStructSize = sizeof(ofn); ofn.hwndOwner = NULL; ofn.lpstrFile = szFile; ofn.nMaxFile = sizeof(szFile);
     ofn.lpstrFilter = save ? "PLY Point Cloud\0*.ply\0" : "Image Files\0*.jpg;*.png;*.bmp;*.jpeg\0All\0*.*\0";
-    ofn.nFilterIndex = 1; ofn.Flags = OFN_PATHMUSTEXIST | OFN_FILEMUSTEXIST; if (save) ofn.Flags = OFN_OVERWRITEPROMPT;
+    ofn.nFilterIndex = 1; ofn.Flags = OFN_PATHMUSTEXIST | OFN_FILEMUSTEXIST;
+    if (save) ofn.Flags = OFN_OVERWRITEPROMPT;
     if ((save ? GetSaveFileNameA(&ofn) : GetOpenFileNameA(&ofn)) == TRUE) return std::string(ofn.lpstrFile);
     return "";
 }
 
+// --- UI Styling ---
 void SetupProfessionalStyle() {
     ImGuiStyle& style = ImGui::GetStyle();
     ImVec4* colors = style.Colors;
@@ -74,7 +82,7 @@ void SetupProfessionalStyle() {
     colors[ImGuiCol_TitleBgActive] = ImVec4(0.20f, 0.22f, 0.27f, 1.00f);
 }
 
-// --- Helper: Help Tooltip ---
+// --- UI Helpers ---
 void HelpMarker(const char* desc) {
     ImGui::TextDisabled("(?)");
     if (ImGui::IsItemHovered()) {
@@ -86,7 +94,6 @@ void HelpMarker(const char* desc) {
     }
 }
 
-// Helper: Wrapped Bullet Text
 void BulletTextWrapped(const char* text) {
     ImGui::Bullet();
     ImGui::PushTextWrapPos(ImGui::GetCursorPos().x + ImGui::GetContentRegionAvail().x);
@@ -94,20 +101,26 @@ void BulletTextWrapped(const char* text) {
     ImGui::PopTextWrapPos();
 }
 
+// ====================================================================================
+// MAIN FUNCTION
+// ====================================================================================
 int main(int argc, char** argv) {
+    // 1. Init OpenGL/GLFW
     GLRenderer renderer;
     if (!renderer.init()) return -1;
 
+    // 2. Init ImGui
     IMGUI_CHECKVERSION(); ImGui::CreateContext(); ImGuiIO& io = ImGui::GetIO(); (void)io;
     SetupProfessionalStyle();
 
-    // Load system font (Segoe UI)
+    // Load Fonts (Try Segoe UI, fallback to default)
     ImFont* font = io.Fonts->AddFontFromFileTTF("c:\\Windows\\Fonts\\segoeui.ttf", 18.0f);
     if (!font) io.Fonts->AddFontDefault();
 
     ImGui_ImplGlfw_InitForOpenGL(renderer.window, true);
     ImGui_ImplOpenGL3_Init("#version 330");
 
+    // 3. Core Objects
     StereoProcessor processor;
     processor.setLogger(LogCallbackFunc);
     AppState state;
@@ -117,15 +130,20 @@ int main(int argc, char** argv) {
 
     g_Log.AddLog("[System] Ready. Load images to start.\n");
 
+    // 4. Main Loop
     while (!glfwWindowShouldClose(renderer.window)) {
         glfwPollEvents();
+
+        // Start ImGui Frame (Updates Inputs)
         ImGui_ImplOpenGL3_NewFrame(); ImGui_ImplGlfw_NewFrame(); ImGui::NewFrame();
 
-        // --- 3D Interaction Logic ---
+        // ---------------------------------------------------------
+        // Interaction Logic (Input Handling)
+        // ---------------------------------------------------------
         if (!io.WantCaptureMouse) {
             double x, y; glfwGetCursorPos(renderer.window, &x, &y);
 
-            // Zoom
+            // Zoom (Scroll)
             if (io.MouseWheel != 0.0f) renderer.camera.processZoom((float)io.MouseWheel);
 
             // Rotate (Left Mouse)
@@ -145,18 +163,36 @@ int main(int argc, char** argv) {
 
         int dispW, dispH; glfwGetFramebufferSize(renderer.window, &dispW, &dispH);
 
-        // --- Check Async Task ---
+        // ---------------------------------------------------------
+        // Async Task Check
+        // ---------------------------------------------------------
         if (state.isProcessing && futureResult.valid()) {
             if (futureResult.wait_for(std::chrono::milliseconds(0)) == std::future_status::ready) {
-                state.processSuccess = futureResult.get(); state.isProcessing = false;
+                state.processSuccess = futureResult.get();
+                state.isProcessing = false;
+
                 if (state.processSuccess) {
-                    renderer.uploadGeometry(processor.pointCloud); renderer.uploadTexture(processor.disparityVis);
+                    renderer.uploadGeometry(processor.pointCloud);
+                    renderer.uploadTexture(processor.disparityVis);
                     state.viewMode = 0;
+
+                    // Auto Focus
+                    if (!processor.pointCloud.empty()) {
+                        glm::vec3 centroid(0.0f);
+                        for (const auto& v : processor.pointCloud) centroid += v.position;
+                        centroid /= (float)processor.pointCloud.size();
+                        renderer.camera.Target = centroid;
+                        renderer.camera.Distance = std::abs(centroid.z) * 0.6f;
+                        if (renderer.camera.Distance < 50.0f) renderer.camera.Distance = 500.0f;
+                        g_Log.AddLog("[Camera] Auto-focused on object center.\n");
+                    }
                 }
             }
         }
 
-        // --- Modal Loading Window ---
+        // ---------------------------------------------------------
+        // Modal Loading Window
+        // ---------------------------------------------------------
         if (state.isProcessing) ImGui::OpenPopup("Processing");
         if (ImGui::BeginPopupModal("Processing", NULL, ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoMove)) {
             ImGui::Text("Processing Pipeline Running..."); ImGui::Separator();
@@ -165,20 +201,18 @@ int main(int argc, char** argv) {
             ImGui::EndPopup();
         }
 
-        // ==================================================================================
-        // UI Layout Definition
-        // ==================================================================================
+        // =========================================================
+        // UI Layout
+        // =========================================================
 
-        // ----------------------------------------------------------
-        // 1. Sidebar (Left Control Panel)
-        // ----------------------------------------------------------
+        // 1. Sidebar (Left)
         ImGui::SetNextWindowPos(ImVec2(0, 0));
         ImGui::SetNextWindowSize(ImVec2(state.sidebarWidth, (float)dispH), ImGuiCond_FirstUseEver);
         ImGui::Begin("Controls", NULL, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoCollapse);
 
-        state.sidebarWidth = ImGui::GetWindowWidth(); // Track width for layout
+        state.sidebarWidth = ImGui::GetWindowWidth();
 
-        // === User Guide ===
+        // User Guide
         if (ImGui::CollapsingHeader("USER GUIDE & HELP", ImGuiTreeNodeFlags_DefaultOpen)) {
             ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.8f, 0.8f, 0.8f, 1.0f));
             ImGui::TextWrapped("How to Navigate:");
@@ -186,59 +220,82 @@ int main(int argc, char** argv) {
             BulletTextWrapped("Pan: Right Click + Drag");
             BulletTextWrapped("Zoom: Scroll Wheel");
             ImGui::Spacing();
-            ImGui::TextWrapped("Workflow:");
-            BulletTextWrapped("1. Load Left/Right images.");
-            BulletTextWrapped("2. Adjust params (optional).");
-            BulletTextWrapped("3. Click RUN RECONSTRUCTION.");
+            ImGui::TextWrapped("Modes:");
+            BulletTextWrapped("Auto: Good for random photos. Uses fake depth scale.");
+            BulletTextWrapped("Manual: Good for datasets (Middlebury). Produces real metrics.");
             ImGui::PopStyleColor();
             ImGui::Separator();
         }
 
+        // 1. Data Source
         ImGui::Spacing();
         ImGui::TextColored(ImVec4(0.4f, 0.6f, 1.0f, 1.0f), "1. DATA SOURCE"); ImGui::Separator(); ImGui::Spacing();
-        if (ImGui::Button(state.pathL.empty() ? "Left Img" : "Left OK", ImVec2(120, 80))) { std::string p = OpenFileDialog(); if (!p.empty()) { state.pathL = p; g_Log.AddLog("Left: %s\n", p.c_str()); } } ImGui::SameLine();
-        if (ImGui::Button(state.pathR.empty() ? "Right Img" : "Right OK", ImVec2(120, 80))) { std::string p = OpenFileDialog(); if (!p.empty()) { state.pathR = p; g_Log.AddLog("Right: %s\n", p.c_str()); } }
+        // Fixed ID conflict by using different labels
+        if (ImGui::Button(state.pathL.empty() ? "Left Img" : "Left OK", ImVec2(120, 80))) {
+            std::string p = OpenFileDialog(); if (!p.empty()) { state.pathL = p; g_Log.AddLog("Left: %s\n", p.c_str()); }
+        }
+        ImGui::SameLine();
+        if (ImGui::Button(state.pathR.empty() ? "Right Img" : "Right OK", ImVec2(120, 80))) {
+            std::string p = OpenFileDialog(); if (!p.empty()) { state.pathR = p; g_Log.AddLog("Right: %s\n", p.c_str()); }
+        }
 
+        // 2. Camera Calibration (Logic Fixed)
         ImGui::Spacing();
-        ImGui::TextColored(ImVec4(0.8f, 0.4f, 0.8f, 1.0f), "2. ALGORITHM SETTINGS"); ImGui::Separator();
+        ImGui::TextColored(ImVec4(1.0f, 0.6f, 0.0f, 1.0f), "2. CAMERA CALIBRATION"); ImGui::Separator();
+        // Bind directly to state.params.useCalibration
+        ImGui::Checkbox("Use Manual Calibration", &state.params.useCalibration);
+        ImGui::SameLine(); HelpMarker("Check this if you have rectified images and known camera parameters (e.g., Middlebury).\nUncheck for random uncalibrated photos.");
 
-        // === Parameters with Help Markers ===
+        if (state.params.useCalibration) {
+            ImGui::BeginDisabled(false);
+            ImGui::InputFloat("Focal Length (px)", &state.params.focalLength);
+            ImGui::InputFloat("Baseline (mm)", &state.params.baseline);
+            ImGui::InputFloat("Principal X", &state.params.principalX);
+            ImGui::InputFloat("Principal Y", &state.params.principalY);
+            ImGui::TextDisabled("(Set 0 for CX/CY to use center)");
+            ImGui::EndDisabled();
+        }
+        else {
+            ImGui::TextDisabled("[Auto Mode Active]");
+            ImGui::TextWrapped("System will auto-rectify images and use fake parameters.");
+        }
+
+        // 3. Algorithm Settings
+        ImGui::Spacing();
+        ImGui::TextColored(ImVec4(0.8f, 0.4f, 0.8f, 1.0f), "3. ALGORITHM SETTINGS"); ImGui::Separator();
 
         ImGui::Text("Processing Scale"); ImGui::SameLine();
-        HelpMarker("Downscale images before processing to speed up computation.\n\nFast (50%): 4x faster, good for tuning.\nHigh (100%): Best detail, slower.");
+        HelpMarker("Fast (50%): 4x faster.\nHigh (100%): Best detail.");
         if (ImGui::RadioButton("Fast (50%)", state.params.processScale == 0.5f)) state.params.processScale = 0.5f; ImGui::SameLine();
         if (ImGui::RadioButton("High (100%)", state.params.processScale == 1.0f)) state.params.processScale = 1.0f;
 
-        ImGui::Text("Disparities"); ImGui::SameLine();
-        HelpMarker("Max search range for matching points.\n\nIncrease this value if foreground objects (close to camera) are missing or cut off.");
+        ImGui::Text("Disparities"); ImGui::SameLine(); HelpMarker("Max search range for matching points.");
         ImGui::SliderInt("##num", &state.params.numDisparities, 16, 256); state.params.numDisparities = (state.params.numDisparities / 16) * 16;
 
-        ImGui::Text("Block Size"); ImGui::SameLine();
-        HelpMarker("Size of the matching window.\n\nSmall (5-9): More fine details, sharper edges, but more noise.\nLarge (11+): Smoother surfaces, less noise, but blurred details.");
+        ImGui::Text("Block Size"); ImGui::SameLine(); HelpMarker("Window size. Small=Detail, Large=Smooth.");
         ImGui::SliderInt("##blk", &state.params.blockSize, 5, 31); if (state.params.blockSize % 2 == 0) state.params.blockSize++;
 
-        ImGui::Text("Min Disp"); ImGui::SameLine();
-        HelpMarker("Minimum disparity shift.\n\nAdjust this if the 3D model seems too far away or if the background is cut off.");
+        ImGui::Text("Min Disp"); ImGui::SameLine(); HelpMarker("Depth offset.");
         ImGui::SliderInt("##min", &state.params.minDisparity, -20, 20);
 
-        ImGui::Text("Noise Filter"); ImGui::SameLine();
-        HelpMarker("Uniqueness Ratio (Strictness).\n\nHigher (5-15): Strict filtering, removes 'ghost' points and flying noise.\nLower (0-5): Relaxed, fills more holes but adds noise.");
+        ImGui::Text("Noise Filter"); ImGui::SameLine(); HelpMarker("Uniqueness ratio (Strictness).");
         ImGui::SliderInt("##uniq", &state.params.uniquenessRatio, 0, 20);
 
+        // 4. Visualization
         ImGui::Spacing();
-        ImGui::TextColored(ImVec4(0.4f, 0.8f, 0.4f, 1.0f), "3. VISUALIZATION"); ImGui::Separator();
-
-        ImGui::Text("Point Size"); ImGui::SameLine();
-        HelpMarker("Visual size of the rendered points.\n\nIncrease size for sparse models to make them look solid.\nDecrease size for dense models to see texture details.");
+        ImGui::TextColored(ImVec4(0.4f, 0.8f, 0.4f, 1.0f), "4. VISUALIZATION"); ImGui::Separator();
+        ImGui::Text("Point Size"); ImGui::SameLine(); HelpMarker("Size of rendered points.");
         ImGui::SliderFloat("##pt", &renderer.pointSize, 1.0f, 10.0f);
 
         ImGui::Spacing(); ImGui::Separator(); ImGui::Spacing();
+
+        // Run Button
         if (ImGui::Button("RUN RECONSTRUCTION", ImVec2(-1, 50)) && !state.isProcessing) {
             if (state.pathL.empty() || state.pathR.empty()) g_Log.AddLog("[Error] Missing images!\n");
             else {
                 state.isProcessing = true;
                 g_Log.AddLog("Starting reconstruction job...\n");
-                // Create explicit copies of string data to ensure thread safety
+                // Capture params by value for thread safety
                 futureResult = std::async(std::launch::async,
                     [&processor, pathL = state.pathL, pathR = state.pathR, params = state.params]() {
                     return processor.process(pathL, pathR, params);
@@ -246,22 +303,27 @@ int main(int argc, char** argv) {
                 );
             }
         }
+        // Export Button
         if (ImGui::Button("EXPORT RESULT (.PLY)", ImVec2(-1, 30))) {
             if (processor.pointCloud.empty()) g_Log.AddLog("[Error] Nothing to export.\n");
-            else { std::string p = OpenFileDialog(true); if (!p.empty()) { if (p.find(".ply") == std::string::npos)p += ".ply"; processor.saveToPLY(p); g_Log.AddLog("Exported to: %s\n", p.c_str()); } }
+            else {
+                std::string p = OpenFileDialog(true);
+                if (!p.empty()) {
+                    if (p.find(".ply") == std::string::npos) p += ".ply";
+                    processor.saveToPLY(p);
+                    g_Log.AddLog("Exported to: %s\n", p.c_str());
+                }
+            }
         }
-        ImGui::End();
+        ImGui::End(); // End Sidebar
 
-        // ----------------------------------------------------------
-        // 2. Bottom Console (Resizable)
-        // ----------------------------------------------------------
+        // 2. Console (Bottom, Resizable)
         if (logHeight < 50.0f) logHeight = 50.0f;
         if (logHeight > dispH * 0.6f) logHeight = dispH * 0.6f;
 
         float consoleY = (float)dispH - logHeight;
         float consoleW = (float)dispW - state.sidebarWidth;
 
-        // Splitter (Invisible resize handle)
         ImGui::SetNextWindowPos(ImVec2(state.sidebarWidth, consoleY - 4.0f));
         ImGui::SetNextWindowSize(ImVec2(consoleW, 4.0f));
         ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0, 0, 0, 0));
@@ -272,33 +334,40 @@ int main(int argc, char** argv) {
         if (ImGui::IsItemActive()) logHeight -= ImGui::GetIO().MouseDelta.y;
         ImGui::End();
 
-        // Console Content
         ImGui::SetNextWindowPos(ImVec2(state.sidebarWidth, consoleY));
         ImGui::SetNextWindowSize(ImVec2(consoleW, logHeight));
         ImGui::Begin("Console Output", NULL, ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoCollapse);
         g_Log.DrawContent();
         ImGui::End();
 
-        // ----------------------------------------------------------
-        // 3. View Switcher (Floating Top-Right)
-        // ----------------------------------------------------------
+        // 3. View Switcher (Floating)
         ImGui::SetNextWindowPos(ImVec2((float)dispW - 220, 20));
         ImGui::SetNextWindowSize(ImVec2(200, 0));
         ImGui::Begin("ViewMode", NULL, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoBackground);
-        bool is3D = (state.viewMode == 0); if (is3D) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.2f, 0.6f, 0.2f, 1));
-        if (ImGui::Button("3D View", ImVec2(90, 30))) state.viewMode = 0; if (is3D) ImGui::PopStyleColor(); ImGui::SameLine();
-        bool isDisp = (state.viewMode == 1); if (isDisp) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.2f, 0.6f, 0.2f, 1));
-        if (ImGui::Button("Disparity", ImVec2(90, 30))) state.viewMode = 1; if (isDisp) ImGui::PopStyleColor();
+
+        // View Mode Logic (Stack Balanced)
+        bool is3D = (state.viewMode == 0);
+        if (is3D) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.2f, 0.6f, 0.2f, 1));
+        if (ImGui::Button("3D View", ImVec2(90, 30))) state.viewMode = 0;
+        if (is3D) ImGui::PopStyleColor();
+
+        ImGui::SameLine();
+
+        bool isDisp = (state.viewMode == 1);
+        if (isDisp) ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.2f, 0.6f, 0.2f, 1));
+        if (ImGui::Button("Disparity", ImVec2(90, 30))) state.viewMode = 1;
+        if (isDisp) ImGui::PopStyleColor();
+
         ImGui::End();
 
-        // ----------------------------------------------------------
-        // 4. Rendering Layer
-        // ----------------------------------------------------------
+        // ---------------------------------------------------------
+        // Rendering
+        // ---------------------------------------------------------
         glViewport(0, 0, dispW, dispH);
-        glClearColor(0.11f, 0.12f, 0.15f, 1.0f);
+        glClearColor(0.11f, 0.12f, 0.15f, 1.0f); // Dark Background
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-        // Render Disparity Background (if active)
+        // Layer 1: Disparity (Background) - Z-Order Fix
         if (state.viewMode == 1 && renderer.disparityTexture != 0) {
             float viewX = state.sidebarWidth;
             float viewW = (float)dispW - state.sidebarWidth;
@@ -311,10 +380,12 @@ int main(int argc, char** argv) {
             ImGui::End();
         }
 
-        // Render 3D Scene (if active)
+        // Layer 2: 3D Scene
         if (state.viewMode == 0) renderer.render3D(processor.pointCloud.size());
 
+        // Layer 3: UI Overlay
         ImGui::Render(); ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+
         glfwSwapBuffers(renderer.window);
     }
 
