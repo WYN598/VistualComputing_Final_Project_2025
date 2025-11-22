@@ -276,7 +276,7 @@ int main(int argc, char** argv) {
         ImGui::SliderInt("##blk", &state.params.blockSize, 5, 31); if (state.params.blockSize % 2 == 0) state.params.blockSize++;
 
         ImGui::Text("Min Disp"); ImGui::SameLine(); HelpMarker("Depth offset.");
-        ImGui::SliderInt("##min", &state.params.minDisparity, -20, 20);
+        ImGui::SliderInt("##min", &state.params.minDisparity, -20, 200);
 
         ImGui::Text("Noise Filter"); ImGui::SameLine(); HelpMarker("Uniqueness ratio (Strictness).");
         ImGui::SliderInt("##uniq", &state.params.uniquenessRatio, 0, 20);

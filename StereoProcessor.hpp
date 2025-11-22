@@ -25,7 +25,6 @@ struct StereoParams {
     int speckleRange = 32;
     float processScale = 0.5f;
 
-    // --- [关键修正] 统一变量名为 useCalibration ---
     bool useCalibration = false;
     float focalLength = 4000.0f;
     float principalX = 0.0f;
@@ -75,18 +74,13 @@ public:
                 log("[Vision] Resized input to %.0f%%.", params.processScale * 100.0f);
             }
 
-            // ====================================================
-            // [关键修正] 逻辑分支：确保标定模式下跳过自动校正
-            // ====================================================
+            // Calibration Mode Check
             if (params.useCalibration) {
-                // 模式 A: 手动标定 (Middlebury)
-                // 假设图片已经对齐，绝对不要运行 computeRectification
                 log("[Vision] Mode: MANUAL (Skipping auto-rectification).");
                 rectLeft = imgL.clone();
                 rectRight = imgR.clone();
             }
             else {
-                // 模式 B: 自动 (Wild Photos)
                 log("[Vision] Mode: AUTO (Running SIFT rectification).");
                 if (!computeRectification(imgL, imgR)) {
                     log("[Error] Rectification failed.");
@@ -94,7 +88,7 @@ public:
                 }
             }
 
-            // === SGBM ===
+            // === SGBM Setup ===
             int realNumDisp = (params.numDisparities / 16) * 16;
             if (realNumDisp < 16) realNumDisp = 16;
             int realBlockSize = params.blockSize | 1;
@@ -113,16 +107,18 @@ public:
             cv::Mat disp16;
             sgbm->compute(rectLeft, rectRight, disp16);
 
-            // Visualization
-            cv::Mat disp8;
-            disp16.convertTo(disp8, CV_8U, 255.0 / (realNumDisp * 16.0));
+            // === Visualization ===
+            // Subtract minDisparity to fix contrast
+            cv::Mat disp8, dispAdjusted;
+            cv::subtract(disp16, cv::Scalar(params.minDisparity * 16), dispAdjusted);
+            dispAdjusted.convertTo(disp8, CV_8U, 255.0 / (realNumDisp * 16.0));
             cv::applyColorMap(disp8, disparityVis, cv::COLORMAP_INFERNO);
 
-            // === [关键修正] 转换视差为浮点数 (单位：像素) ===
+            // === Disparity to Float ===
             cv::Mat dispFloat;
             disp16.convertTo(dispFloat, CV_32F, 1.0 / 16.0);
 
-            // === Q Matrix ===
+            // === Q Matrix Construction ===
             double W = rectLeft.cols;
             double H = rectLeft.rows;
             cv::Mat Q = cv::Mat::eye(4, 4, CV_64F);
@@ -137,22 +133,30 @@ public:
                 if (std::abs(cx) < 1e-5) cx = W / 2.0;
                 if (std::abs(cy) < 1e-5) cy = H / 2.0;
 
+                // [CRITICAL FIX HERE]
                 Q.at<double>(0, 3) = -cx;
                 Q.at<double>(1, 3) = -cy;
                 Q.at<double>(2, 3) = f;
-                Q.at<double>(3, 2) = -1.0 / B;
-                log("[Vision] Real Q Matrix: f=%.1f, B=%.1f", f, B);
+
+                // Changed from -1.0/B to 1.0/B to ensure Z is POSITIVE.
+                // W = d/B, Z = f*B/d (Positive)
+                Q.at<double>(3, 2) = 1.0 / B;
+
+                // Ensure linear depth
+                Q.at<double>(3, 3) = 0.0;
+
+                log("[Vision] Real Q Matrix: f=%.1f, B=%.1f, Q32=%.5f", f, B, Q.at<double>(3, 2));
             }
             else {
+                // Auto mode fake Q
                 double f_guess = 0.8 * W;
                 Q.at<double>(0, 3) = -W / 2.0;
                 Q.at<double>(1, 3) = -H / 2.0;
                 Q.at<double>(2, 3) = f_guess;
                 Q.at<double>(3, 2) = -1.0 / W;
-                log("[Vision] Fake Q Matrix (Topology only)");
             }
 
-            // Reprojection using float disparity
+            // Reprojection
             cv::Mat points3D;
             cv::reprojectImageTo3D(dispFloat, points3D, Q, true);
 
@@ -160,20 +164,26 @@ public:
             pointCloud.reserve(W * H);
 
             float maxDepth = params.useCalibration ? 50000.0f : 10000.0f;
-            float minDepth = 10.0f;
 
             int step = 1;
             for (int y = 0; y < H; y += step) {
                 for (int x = 0; x < W; x += step) {
                     float d = dispFloat.at<float>(y, x);
-                    if (d < 2.0f) continue; // 过滤极小视差
+
+                    // Filter: keep only valid disparities (>= minDisparity)
+                    // Use a small tolerance (-0.5) to handle float precision issues with 57.0
+                    if (d < ((float)params.minDisparity - 0.5f)) continue;
 
                     cv::Vec3f p = points3D.at<cv::Vec3f>(y, x);
                     cv::Vec3b c = rectLeft.at<cv::Vec3b>(y, x);
 
+                    // Check coordinate validity
                     if (std::isfinite(p[0]) && std::isfinite(p[1]) && std::isfinite(p[2])) {
-                        if (p[2] > minDepth && p[2] < maxDepth) {
+                        // Filter by Depth (Positive Z)
+                        // Now that Q(3,2) is positive, p[2] will be positive.
+                        if (p[2] > 10.0f && p[2] < maxDepth) {
                             Vertex v;
+                            // Transform to OpenGL (Look down -Z)
                             v.position = glm::vec3(p[0], -p[1], -p[2]);
                             v.color = glm::vec3(c[2] / 255.0f, c[1] / 255.0f, c[0] / 255.0f);
                             pointCloud.push_back(v);
@@ -206,17 +216,18 @@ public:
 
 private:
     bool computeRectification(const cv::Mat& imgL, const cv::Mat& imgR) {
-        // ... (保持原有的 SIFT + RANSAC + Rectify 代码不变) ...
-        // 为节省篇幅，请确保这里包含完整的 computeRectification 实现
         std::vector<cv::KeyPoint> kp1, kp2;
         cv::Mat desc1, desc2;
         cv::Ptr<cv::SIFT> sift = cv::SIFT::create();
         sift->detectAndCompute(imgL, cv::noArray(), kp1, desc1);
         sift->detectAndCompute(imgR, cv::noArray(), kp2, desc2);
+
         if (desc1.empty() || desc2.empty()) return false;
+
         cv::FlannBasedMatcher matcher;
         std::vector<std::vector<cv::DMatch>> knn_matches;
         matcher.knnMatch(desc1, desc2, knn_matches, 2);
+
         std::vector<cv::Point2f> pts1, pts2;
         const float ratio_thresh = 0.75f;
         for (size_t i = 0; i < knn_matches.size(); i++) {
@@ -226,9 +237,11 @@ private:
             }
         }
         if (pts1.size() < 15) return false;
+
         cv::Mat mask;
         cv::Mat F = cv::findFundamentalMat(pts1, pts2, cv::FM_RANSAC, 3.0, 0.99, mask);
         if (F.empty()) return false;
+
         std::vector<cv::Point2f> good1, good2;
         for (int i = 0; i < mask.rows; i++) {
             if (mask.at<uchar>(i)) {
@@ -237,6 +250,7 @@ private:
             }
         }
         if (good1.size() < 10) return false;
+
         cv::Mat H1, H2;
         cv::stereoRectifyUncalibrated(good1, good2, F, imgL.size(), H1, H2, 5.0);
         cv::warpPerspective(imgL, rectLeft, H1, imgL.size());

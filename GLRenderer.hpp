@@ -1,4 +1,4 @@
-#pragma once
+Ôªø#pragma once
 #include <GL/glew.h>
 #include <GLFW/glfw3.h>
 #include <glm/glm.hpp>
@@ -44,14 +44,12 @@ public:
         if (Pitch > 89.0f) Pitch = 89.0f; if (Pitch < -89.0f) Pitch = -89.0f;
     }
 
-    // °æ–ﬁ∏¥°ø‘ –ÌÀı∑≈µΩ∑«≥£Ω¸ (0.1f)£¨≤¢‘ˆº”πˆ¬÷¡È√Ù∂»
     void processZoom(float dy) {
-        // ∂ØÃ¨Àı∑≈ÀŸ∂»£∫æ‡¿Î‘ΩΩ¸£¨Àı∑≈‘Ω¬˝£®∑¿÷π“ªœ¬◊”¥©ƒ££©
         float zoomSpeed = Distance * 0.1f;
         if (zoomSpeed < 1.0f) zoomSpeed = 1.0f;
 
         Distance -= dy * zoomSpeed;
-        if (Distance < 0.1f) Distance = 0.1f; // ◊Ó–°æ‡¿Î∏ƒŒ™ 0.1
+        if (Distance < 0.1f) Distance = 0.1f; 
     }
 
     void processPan(float dx, float dy) {
@@ -107,7 +105,6 @@ public:
 
     void initGridAxes() {
         std::vector<Vertex> lines;
-        // °æ”≈ªØ°øÕ¯∏Òª≠¥Û“ªµ„£¨“‘  ”¶’Ê µ≥ﬂ∂» ˝æ›
         float size = 50000.0f;
         float step = 2000.0f;
         glm::vec3 gray(0.25f); glm::vec3 dark(0.15f);
@@ -117,7 +114,6 @@ public:
             lines.push_back({ glm::vec3(i, 0, -size), c }); lines.push_back({ glm::vec3(i, 0, size), c });
             lines.push_back({ glm::vec3(-size, 0, i), c }); lines.push_back({ glm::vec3(size, 0, i), c });
         }
-        // ◊¯±Í÷·ª≠≥§“ªµ„
         lines.push_back({ glm::vec3(-size, 0, 0), glm::vec3(0.8f, 0.2f, 0.2f) }); lines.push_back({ glm::vec3(size, 0, 0), glm::vec3(0.8f, 0.2f, 0.2f) });
         lines.push_back({ glm::vec3(0, 0, -size), glm::vec3(0.2f, 0.2f, 0.8f) }); lines.push_back({ glm::vec3(0, 0, size), glm::vec3(0.2f, 0.2f, 0.8f) });
         lines.push_back({ glm::vec3(0, -size, 0), glm::vec3(0.2f, 0.8f, 0.2f) }); lines.push_back({ glm::vec3(0, size, 0), glm::vec3(0.2f, 0.8f, 0.2f) });
@@ -149,7 +145,6 @@ public:
 
     void render3D(size_t pointCount) {
         int dw, dh; glfwGetFramebufferSize(window, &dw, &dh); glViewport(0, 0, dw, dh);
-        // ‘ˆº”‘∂≤√ºÙ√ÊµΩ 500,000£¨∑¿÷π¥Û≥°æ∞ø¥≤ªº˚
         glm::mat4 proj = glm::perspective(glm::radians(45.0f), (float)dw / dh, 1.0f, 500000.0f);
         glm::mat4 view = camera.getViewMatrix();
         glm::mat4 MVP = proj * view;
