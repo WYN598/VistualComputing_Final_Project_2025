@@ -49,7 +49,7 @@ public:
         if (zoomSpeed < 1.0f) zoomSpeed = 1.0f;
 
         Distance -= dy * zoomSpeed;
-        if (Distance < 0.1f) Distance = 0.1f; 
+        if (Distance < 0.1f) Distance = 0.1f;
     }
 
     void processPan(float dx, float dy) {

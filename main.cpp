@@ -101,9 +101,7 @@ void BulletTextWrapped(const char* text) {
     ImGui::PopTextWrapPos();
 }
 
-// ====================================================================================
-// MAIN FUNCTION
-// ====================================================================================
+// main
 int main(int argc, char** argv) {
     // 1. Init OpenGL/GLFW
     GLRenderer renderer;
@@ -137,9 +135,7 @@ int main(int argc, char** argv) {
         // Start ImGui Frame (Updates Inputs)
         ImGui_ImplOpenGL3_NewFrame(); ImGui_ImplGlfw_NewFrame(); ImGui::NewFrame();
 
-        // ---------------------------------------------------------
         // Interaction Logic (Input Handling)
-        // ---------------------------------------------------------
         if (!io.WantCaptureMouse) {
             double x, y; glfwGetCursorPos(renderer.window, &x, &y);
 
@@ -163,9 +159,7 @@ int main(int argc, char** argv) {
 
         int dispW, dispH; glfwGetFramebufferSize(renderer.window, &dispW, &dispH);
 
-        // ---------------------------------------------------------
         // Async Task Check
-        // ---------------------------------------------------------
         if (state.isProcessing && futureResult.valid()) {
             if (futureResult.wait_for(std::chrono::milliseconds(0)) == std::future_status::ready) {
                 state.processSuccess = futureResult.get();
@@ -190,9 +184,7 @@ int main(int argc, char** argv) {
             }
         }
 
-        // ---------------------------------------------------------
         // Modal Loading Window
-        // ---------------------------------------------------------
         if (state.isProcessing) ImGui::OpenPopup("Processing");
         if (ImGui::BeginPopupModal("Processing", NULL, ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoMove)) {
             ImGui::Text("Processing Pipeline Running..."); ImGui::Separator();
@@ -201,11 +193,8 @@ int main(int argc, char** argv) {
             ImGui::EndPopup();
         }
 
-        // =========================================================
         // UI Layout
-        // =========================================================
-
-        // 1. Sidebar (Left)
+        // Sidebar (Left)
         ImGui::SetNextWindowPos(ImVec2(0, 0));
         ImGui::SetNextWindowSize(ImVec2(state.sidebarWidth, (float)dispH), ImGuiCond_FirstUseEver);
         ImGui::Begin("Controls", NULL, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoCollapse);
@@ -227,7 +216,7 @@ int main(int argc, char** argv) {
             ImGui::Separator();
         }
 
-        // 1. Data Source
+        // Data Source
         ImGui::Spacing();
         ImGui::TextColored(ImVec4(0.4f, 0.6f, 1.0f, 1.0f), "1. DATA SOURCE"); ImGui::Separator(); ImGui::Spacing();
         if (ImGui::Button(state.pathL.empty() ? "Left Img" : "Left OK", ImVec2(120, 80))) {
@@ -238,7 +227,7 @@ int main(int argc, char** argv) {
             std::string p = OpenFileDialog(); if (!p.empty()) { state.pathR = p; g_Log.AddLog("Right: %s\n", p.c_str()); }
         }
 
-        // 2. Camera Calibration
+        //  Camera Calibration
         ImGui::Spacing();
         ImGui::TextColored(ImVec4(1.0f, 0.6f, 0.0f, 1.0f), "2. CAMERA CALIBRATION"); ImGui::Separator();
         ImGui::Checkbox("Use Manual Calibration", &state.params.useCalibration);
@@ -258,11 +247,11 @@ int main(int argc, char** argv) {
             ImGui::TextWrapped("System will auto-rectify images and use fake parameters.");
         }
 
-        // 3. Algorithm Settings
+        // Algorithm Settings
         ImGui::Spacing();
         ImGui::TextColored(ImVec4(0.8f, 0.4f, 0.8f, 1.0f), "3. ALGORITHM SETTINGS"); ImGui::Separator();
 
-        // [New] WLS Filter Toggle
+        // WLS Filter Toggle
         ImGui::Checkbox("Use WLS Filter (Pro)", &state.params.useWLS);
         ImGui::SameLine(); HelpMarker("Weighted Least Squares Filter.\nFill holes and smooth surfaces based on color edges.");
 

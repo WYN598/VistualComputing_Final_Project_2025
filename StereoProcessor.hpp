@@ -1,9 +1,7 @@
-#pragma once
+ï»¿#pragma once
 #include <opencv2/opencv.hpp>
 #include <opencv2/features2d.hpp>
 #include <opencv2/calib3d.hpp>
-// [WLS±ØÑ¡] ÒýÈë ximgproc Ä£¿é£¬Í¨³£ÔÚ opencv_contrib ÖÐ
-// Èç¹û±¨´í "No such file"£¬ÇëÈ·±£°²×°ÁË opencv-contrib-python (Python) »ò opencv_contrib (C++)
 #include <opencv2/ximgproc.hpp> 
 
 #include <vector>
@@ -29,10 +27,10 @@ struct StereoParams {
     int speckleRange = 32;
     float processScale = 0.5f;
 
-    // --- [New] WLS Filter Toggle ---
-    bool useWLS = true;          // ÓÃ»§¿ª¹Ø£ºÊÇ·ñÆôÓÃ WLS ÂË²¨
-    double wlsLambda = 8000.0;   // Æ½»¬ÏµÊý (¾­ÑéÖµ 8000)
-    double wlsSigma = 1.5;       // ÑÕÉ«Ãô¸Ð¶È (¾­ÑéÖµ 1.0-2.0)
+    // --- WLS Filter Toggle ---
+    bool useWLS = true;        
+    double wlsLambda = 8000.0; 
+    double wlsSigma = 1.5;      
 
     // --- Calibration Flags ---
     bool useCalibration = false;
@@ -103,7 +101,6 @@ public:
             if (realNumDisp < 16) realNumDisp = 16;
             int realBlockSize = params.blockSize | 1;
 
-            // 1. ´´½¨×óÆ¥ÅäÆ÷ (Left Matcher)
             cv::Ptr<cv::StereoSGBM> sgbm = cv::StereoSGBM::create(
                 params.minDisparity, realNumDisp, realBlockSize,
                 8 * 3 * realBlockSize * realBlockSize,
@@ -117,31 +114,23 @@ public:
 
             cv::Mat disp16;
 
-            // =========================================================
-            // [New] WLS Filtering Logic
-            // =========================================================
+            // WLS Filtering Logic
             if (params.useWLS) {
                 log("[Vision] Running WLS Filter (Lambda=%.0f)...", params.wlsLambda);
 
-                // 2. ´´½¨ÓÒÆ¥ÅäÆ÷ (Right Matcher) - ÓÃÓÚÒ»ÖÂÐÔ¼ì²é
-                // ÕâÒ»²½ÐèÒª opencv_contrib Ä£¿é
                 cv::Ptr<cv::StereoMatcher> right_matcher = cv::ximgproc::createRightMatcher(sgbm);
 
-                // 3. ¼ÆËã×óÓÒÊÓ²îÍ¼
                 cv::Mat leftDisp, rightDisp;
                 sgbm->compute(rectLeft, rectRight, leftDisp);
                 right_matcher->compute(rectRight, rectLeft, rightDisp);
 
-                // 4. ´´½¨²¢Ó¦ÓÃ WLS ÂË²¨Æ÷
                 cv::Ptr<cv::ximgproc::DisparityWLSFilter> wls_filter = cv::ximgproc::createDisparityWLSFilter(sgbm);
                 wls_filter->setLambda(params.wlsLambda);
                 wls_filter->setSigmaColor(params.wlsSigma);
 
-                // 5. ÂË²¨ (½á¹û´æÈë disp16)
                 wls_filter->filter(leftDisp, rectLeft, disp16, rightDisp);
             }
             else {
-                // ±ê×¼Ä£Ê½£ºÖ»¼ÆËã×óÊÓ²î
                 sgbm->compute(rectLeft, rectRight, disp16);
             }
 
@@ -239,7 +228,6 @@ public:
 
 private:
     bool computeRectification(const cv::Mat& imgL, const cv::Mat& imgR) {
-        // (´úÂë±£³Ö²»±ä£¬ÓëÖ®Ç°Ò»ÖÂ)
         std::vector<cv::KeyPoint> kp1, kp2;
         cv::Mat desc1, desc2;
         cv::Ptr<cv::SIFT> sift = cv::SIFT::create();
