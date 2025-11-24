@@ -85,7 +85,7 @@ public:
         glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
         glfwWindowHint(GLFW_SAMPLES, 4);
 
-        window = glfwCreateWindow(width, height, "Pro Stereo Reconstruction", NULL, NULL);
+        window = glfwCreateWindow(width, height, "Stereo Reconstruction System", NULL, NULL);
         if (!window) return false;
         glfwMakeContextCurrent(window);
         if (glewInit() != GLEW_OK) return false;
