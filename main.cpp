@@ -196,9 +196,8 @@ int main(int argc, char** argv) {
         // UI Layout
         // Sidebar (Left)
         ImGui::SetNextWindowPos(ImVec2(0, 0));
-        ImGui::SetNextWindowSize(ImVec2(state.sidebarWidth, (float)dispH), ImGuiCond_FirstUseEver);
-        ImGui::Begin("Controls", NULL, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoCollapse);
-
+        ImGui::SetNextWindowSize(ImVec2(state.sidebarWidth, (float)dispH), ImGuiCond_Always);
+        ImGui::Begin("Controls", NULL, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize);
         state.sidebarWidth = ImGui::GetWindowWidth();
 
         // User Guide
@@ -209,9 +208,7 @@ int main(int argc, char** argv) {
             BulletTextWrapped("Pan: Right Click + Drag");
             BulletTextWrapped("Zoom: Scroll Wheel");
             ImGui::Spacing();
-            ImGui::TextWrapped("Tips:");
-            BulletTextWrapped("Artroom: Use WLS, small block size (5-7), min disp 90.");
-            BulletTextWrapped("Skiboots: Min disp 57, block size 15+.");
+
             ImGui::PopStyleColor();
             ImGui::Separator();
         }
@@ -231,7 +228,7 @@ int main(int argc, char** argv) {
         ImGui::Spacing();
         ImGui::TextColored(ImVec4(1.0f, 0.6f, 0.0f, 1.0f), "2. CAMERA CALIBRATION"); ImGui::Separator();
         ImGui::Checkbox("Use Manual Calibration", &state.params.useCalibration);
-        ImGui::SameLine(); HelpMarker("Check this if you have rectified images and known camera parameters (e.g., Middlebury).");
+        ImGui::SameLine(); HelpMarker("Check this if you have rectified images and known camera parameters.");
 
         if (state.params.useCalibration) {
             ImGui::BeginDisabled(false);
@@ -252,7 +249,7 @@ int main(int argc, char** argv) {
         ImGui::TextColored(ImVec4(0.8f, 0.4f, 0.8f, 1.0f), "3. ALGORITHM SETTINGS"); ImGui::Separator();
 
         // WLS Filter Toggle
-        ImGui::Checkbox("Use WLS Filter (Pro)", &state.params.useWLS);
+        ImGui::Checkbox("Use WLS Filter", &state.params.useWLS);
         ImGui::SameLine(); HelpMarker("Weighted Least Squares Filter.\nFill holes and smooth surfaces based on color edges.");
 
         if (state.params.useWLS) {
@@ -269,14 +266,13 @@ int main(int argc, char** argv) {
         if (ImGui::RadioButton("Fast (50%)", state.params.processScale == 0.5f)) state.params.processScale = 0.5f; ImGui::SameLine();
         if (ImGui::RadioButton("High (100%)", state.params.processScale == 1.0f)) state.params.processScale = 1.0f;
 
-        ImGui::Text("Disparities"); ImGui::SameLine(); HelpMarker("Max search range (must be > max_disp in calib.txt).");
+        ImGui::Text("Disparities"); ImGui::SameLine(); HelpMarker("Max search range");
         ImGui::SliderInt("##num", &state.params.numDisparities, 16, 400); state.params.numDisparities = (state.params.numDisparities / 16) * 16;
 
-        ImGui::Text("Block Size"); ImGui::SameLine(); HelpMarker("Window size. Small=Detail(Artroom), Large=Smooth(Skiboots).");
+        ImGui::Text("Block Size"); ImGui::SameLine(); HelpMarker("Window size. Small=Detail, Large=Smooth.");
         ImGui::SliderInt("##blk", &state.params.blockSize, 5, 31); if (state.params.blockSize % 2 == 0) state.params.blockSize++;
 
-        ImGui::Text("Min Disp"); ImGui::SameLine(); HelpMarker("Minimum disparity (vmin in calib.txt).");
-        // [FIX] Increased range from -20~20 to 0~300 to accommodate real datasets
+        ImGui::Text("Min Disp"); ImGui::SameLine(); HelpMarker("Minimum disparity");
         ImGui::SliderInt("##min", &state.params.minDisparity, 0, 300);
 
         ImGui::Text("Noise Filter"); ImGui::SameLine(); HelpMarker("Uniqueness Ratio. Lower = More points (noisier). Higher = Cleaner (less points).");
