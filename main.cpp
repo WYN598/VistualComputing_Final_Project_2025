@@ -355,14 +355,12 @@ int main(int argc, char** argv) {
 
         ImGui::End();
 
-        // ---------------------------------------------------------
         // Rendering
-        // ---------------------------------------------------------
         glViewport(0, 0, dispW, dispH);
         glClearColor(0.11f, 0.12f, 0.15f, 1.0f); // Dark Background
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-        // Layer 1: Disparity (Background)
+        // Disparity 
         if (state.viewMode == 1 && renderer.disparityTexture != 0) {
             float viewX = state.sidebarWidth;
             float viewW = (float)dispW - state.sidebarWidth;
@@ -375,10 +373,10 @@ int main(int argc, char** argv) {
             ImGui::End();
         }
 
-        // Layer 2: 3D Scene
+        //  3D Scene
         if (state.viewMode == 0) renderer.render3D(processor.pointCloud.size());
 
-        // Layer 3: UI Overlay
+        //  UI Overlay
         ImGui::Render(); ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
 
         glfwSwapBuffers(renderer.window);
